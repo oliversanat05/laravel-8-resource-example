@@ -1,0 +1,202 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1\DataTrackingController;
+
+use Auth;
+use Lang;
+use App\Traits\ApiResponse;
+use App\Services\VMapSystem;
+use Illuminate\Http\Request;
+use App\Models\Succession\VMap;
+use App\Http\Controllers\Controller;
+use App\Models\Tracking\TrackingData;
+use App\Models\Tracking\AutoTrackingData;
+use App\Services\TrackingService\TrackingService;
+use App\Http\Requests\trackingRequest\TrackingDataRequest;
+use App\Http\Requests\trackingRequest\UpdateTrackingRequest;
+use App\Http\Requests\trackingRequest\RevertDeletedTrackingDataRequest;
+use App\Http\Requests\trackingRequest\SystemGeneratedTrackingDataRequest;
+use DB;
+
+class DataTrackingController extends Controller {
+    use ApiResponse;
+
+	public function __construct() {
+		$this->tracking = new TrackingService();
+		$this->vMap = new VMapSystem();
+	}
+
+	/**
+	 * method used to filter the tracking data
+	 *
+	 * @param $request
+	 */
+	public function index(Request $request) {
+		try{
+			$params = $request->all();
+			$data = $this->tracking->setSerializeArray($this->tracking->unSerializeTrackingDataParams($params));
+			return $this->successApiResponse(__('core.trackingData'), $data);
+		} catch (\Exception$th) {
+			return $this->errorApiResponse(__('core.internalServerError'));
+		}
+	}
+
+	/**
+	 * This function is used to add the tracking data to
+	 * the database
+	 * @param $request
+	 * @return JSON
+	 */
+	public function store(TrackingDataRequest $request) {
+		$dataArray = [];
+
+		try {
+			$data = $request->all();
+            $dataArray = $this->tracking->setTrackingDataRecord($data);
+
+            return $this->successApiResponse(__('core.newRecordSave'), $dataArray);
+		} catch (\Exception$th) {
+			return $this->errorApiResponse(__('core.internalServerError'));
+		}
+		return null;
+	}
+
+    /**
+     * this function will update the tracking data record
+     *
+     * @param UpdateTrackingRequest $request
+     * @param $id
+     * @return JSON
+     */
+    public function update(UpdateTrackingRequest $request, $id)
+    {
+
+        try {
+            $checkIdExists = TrackingData::findOrFail($id);
+
+            if($checkIdExists->exists()){
+                $checkIdExists->update($request->updateTrackingData());
+
+                return $this->successApiResponse(__('core.updateTrackingData'), $checkIdExists);
+            }else{
+                return $this->unprocessableApiResponse(__('core.exists'));
+            }
+        } catch (\Throwable $th) {
+            return $this->errorApiResponse(__('core.internalServerError'));
+        }
+
+
+    }
+
+	/**
+	 * This function will delete tracking data from the database
+	 * @param $request
+	 * @return bool
+	 */
+	public function destroy($id) {
+
+		try {
+
+			$checkId = TrackingData::checkTrackingIdExists($id);
+
+			if ($checkId) {
+				$delete = $this->tracking->deleteTrackingDataRecords($id);
+                return $this->successApiResponse(__('core.deleteRecord'));
+			} else {
+                return $this->unprocessableApiResponse(__('core.exists'));
+			}
+		} catch (\Throwable$th) {
+            return $this->unprocessableApiResponse(__('core.deleteNotRecord'));
+		}
+
+		return null;
+
+	}
+
+	/**
+	 * This function will delete tracking data from the database
+	 * @param $request
+	 * @return bool
+	 */
+	public function status(Request $request) {
+
+		try {
+
+			$params = $request->all();
+
+			$checkId = TrackingData::checkTrackingIdExists($params['id']);
+
+			if ($checkId) {
+				$trackingDataStatus = $this->tracking->updateTrackingDataStatus($params);
+                return $this->successApiResponse(__('core.updateTrackingData'));
+			} else {
+                return $this->unprocessableApiResponse(__('core.exists'));
+			}
+		} catch (\Throwable$th) {
+            return $this->unprocessableApiResponse(__('core.internalServerError'));
+		}
+
+		return null;
+
+	}
+
+    /**
+     * undo the tracking data delete
+     *
+     * @param Request $request
+     * @return void
+     */
+    public function deleteSystemGeneratedTrackingData(RevertDeletedTrackingDataRequest $request)
+    {
+        try {
+            $trackingId = $request->id;
+            $revertTrackingDataDelete = $this->tracking->deleteSystemGeneratedData($trackingId);
+
+            return $this->successApiResponse(__('core.trackingDataUndoSuccess'));
+
+        } catch (\Throwable $th) {
+            throw $th;
+        }
+    }
+
+    /**
+     * get the deleted tracking data list
+     *
+     * @return collection
+     */
+    public function getDeletedTrackingDataList()
+    {
+        $getDeletedTrackingData = AutoTrackingData::where('user_id', Auth::user()->user_id)->get();
+
+        return $this->successApiResponseWithoutMessage($getDeletedTrackingData);
+    }
+
+    /**
+     * insert the auto generated tracking records
+     *
+     * @param SystemGeneratedTrackingDataRequest $request
+     * @return void
+     */
+    public function insertAutoGeneratedTrackingData(SystemGeneratedTrackingDataRequest $request)
+    {
+        try {
+
+            DB::beginTransaction();
+
+            $autoGeneratedData = $this->tracking->insertAutoGeneratedData($request->all());
+
+            DB::commit();
+
+            if($autoGeneratedData) {
+                return $this->successApiResponse(__('core.autoGeneratedTrackingDataInsertSuccess'));
+            } else {
+                return $this->unprocessableApiResponse(__('core.autoGeneratedTrackingDataInsertError'));
+            }
+        } catch (\Throwable $th) {
+
+            DB::rollback();
+            throw $th;
+        }
+    }
+
+}
